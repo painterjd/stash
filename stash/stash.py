@@ -1,34 +1,21 @@
 #!/usr/bin/env python
 
 import argparse
-import base64
-import configparser
 import colorama
 from colorama import Fore, Style
 import datetime
 import getpass
-import hashlib
-import hmac
 import time
 import json
 import keyring
 import os
 import requests
-import urllib.parse
 import sys
 
 import stash.config
+import stash.util
 
 STASH_CONTAINER_NAME = "stash_container"
-
-def print_error(error):
-    print (Style.BRIGHT + Fore.RED + "ERROR: " +
-           Fore.GREEN + error +
-           Style.NORMAL + Fore.RESET)
-
-def parse_iso_8601(date):
-    formatstr = "%Y-%m-%dT%H:%M:%S.%fZ"
-    return datetime.datetime.strptime(date, formatstr)
 
 def do_auth(username, apikey, use_cache=True):
 
@@ -38,7 +25,7 @@ def do_auth(username, apikey, use_cache=True):
         ep_text = keyring.get_password('stash', 'endpoints')
 
         if token_expires and token and ep_text:
-            expires_date = parse_iso_8601(token_expires)
+            expires_date = stash.util.parse_iso_8601(token_expires)
             now = datetime.datetime.utcnow()
 
             if now < expires_date:
@@ -131,7 +118,7 @@ def file_exists(token, url, filename):
     print ("Sharing '{0}' from your stash".format(filename))
 
     url = url + '/' + STASH_CONTAINER_NAME
-    url = url + '/' + encode_filename(filename)
+    url = url + '/' + stash.util.encode_filename(filename)
 
     hdrs = {
         'X-Auth-Token': token
@@ -146,26 +133,6 @@ def file_exists(token, url, filename):
     else:  # something else happened
         raise Exception("Unable to stash a file")
 
-def create_temp_url(key, url, filename, duration):
-
-    path = urllib.parse.urlparse(url).path
-
-    method = "GET"
-    object_path = path + "/" + STASH_CONTAINER_NAME + "/" + encode_filename(filename)
-
-    # duration is expressed in hours
-    expires = int(time.time() + duration*60)
-
-    hmac_body = "{0}\n{1}\n{2}".format(
-        method, expires, object_path)
-
-    sig = hmac.new(bytes(key, 'utf-8'), bytes(hmac_body, 'utf-8'),
-        hashlib.sha1).hexdigest()
-
-    return "{0}/{1}/{2}?temp_url_sig={3}&temp_url_expires={4}&filename={5}".format(
-        url, STASH_CONTAINER_NAME, encode_filename(filename), sig, expires,
-        urllib.parse.quote_plus(filename))
-
 def read_temp_url_key(token, url):
 
     hdrs = {
@@ -179,16 +146,16 @@ def read_temp_url_key(token, url):
 
 def do_share_file(token, url, filename, duration):
     if not file_exists(token, url, filename):
-        print_error("File '{0}' not found".format(filename))
+        stash.util.print_error("File '{0}' not found".format(filename))
         return
 
     key = read_temp_url_key(token, url)
 
     if not key:
-        print_error("""You must set a temp url key to enable sharing""")
+        stash.util.print_error("""You must set a Temp URL key first.""")
         return
 
-    temp_url = create_temp_url(key, url, filename, duration)
+    temp_url = stash.util.create_temp_url(key, url, filename, duration)
 
     print ("Share this URL: ")
     print (temp_url)
@@ -249,9 +216,6 @@ def do_configure(identityhost):
     # Now let's store that stuff in the config
     stash.config.write_config(username, apikey, region, publicurl)
 
-def get_default_filename():
-    pass
-
 def do_fetch_file(token, url, filename, outfile):
     """Fetches the specified object"""
 
@@ -260,7 +224,7 @@ def do_fetch_file(token, url, filename, outfile):
     print ("Fetching '{0}' -> '{1}'".format(filename, outfile))
 
     url = url + '/' + STASH_CONTAINER_NAME
-    url = url + '/' + encode_filename(filename)
+    url = url + '/' + stash.util.encode_filename(filename)
 
     hdrs = {
         'X-Auth-Token': token
@@ -314,7 +278,7 @@ def do_upload_file(token, url, filename):
     _, fname = os.path.split(filename)
 
     url = url + '/' + STASH_CONTAINER_NAME
-    url = url + '/' + encode_filename(fname)
+    url = url + '/' + stash.util.encode_filename(fname)
 
     hdrs = {
         'X-Auth-Token': token
@@ -332,14 +296,6 @@ def do_upload_file(token, url, filename):
 
     print ("Finished stashing...")
 
-def encode_filename(filename):
-    b64 = base64.b64encode(bytes(filename, 'utf-8'))
-    return b64.decode('utf-8')
-
-def decode_filename(encoded):
-    b = bytes(encoded, 'utf-8')
-    decoded_bytes = base64.b64decode(b)
-    return decoded_bytes.decode('utf-8')
 
 def do_delete_object(token, url, filename):
     """Stashes the specified local file"""
@@ -348,7 +304,7 @@ def do_delete_object(token, url, filename):
     _, fname = os.path.split(filename)
 
     url = url + '/' + STASH_CONTAINER_NAME
-    url = url + '/' + encode_filename(fname)
+    url = url + '/' + stash.util.encode_filename(fname)
 
     hdrs = {
         'X-Auth-Token': token
@@ -357,7 +313,7 @@ def do_delete_object(token, url, filename):
     output = requests.delete(url, headers=hdrs)
 
     if output.status_code == 404:
-        print_error ("File not stashed: " + filename)
+        stash.util.print_error ("File not stashed: " + filename)
         return False
     elif output.ok:
         print ("File '{0}' was deleted from stash".format(filename))
@@ -401,7 +357,7 @@ def do_list_stashes(token, url):
                 Fore.GREEN, x, Fore.RESET
             )
 
-            filename = decode_filename(item['name'])
+            filename = stash.util.decode_filename(item['name'])
             size = item['bytes']
 
             size = Fore.CYAN + " {" + str(size) + " bytes}"
@@ -496,7 +452,7 @@ def main():
         exit(0)
 
     if not args.filename:
-        print_error("Give me something to stash.")
+        stash.util.print_error("Give me something to stash.")
 
     else:
         # legit commands, mapped to handle functions
