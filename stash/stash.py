@@ -146,7 +146,6 @@ def do_fetch_file(token, url, filename, outfile):
 def do_upload_file(token, url, filename):
     """Stashes the specified local file"""
 
-    print ("Stashing your item...")
 
     _, fname = os.path.split(filename)
 
@@ -157,8 +156,10 @@ def do_upload_file(token, url, filename):
         'X-Auth-Token': token
     }
 
-    with open(filename, 'rb') as infile:
-        output = requests.put(url, data=infile, headers=hdrs)
+    it = stash.eyeoh.upload_in_chunks(filename, 1024)
+
+    output = requests.put(url, data=stash.eyeoh.IterableToFileAdapter(it),
+        headers=hdrs)
 
     if output.status_code == 404:
         return False
@@ -291,7 +292,7 @@ def main():
                         default=True, nargs="?",
                         help="Don't use auth cache for this request")
 
-    parser.add_argument("filename", nargs="?",
+    parser.add_argument("filename", nargs="*",
                         help="The file to stash")
 
     args = parser.parse_args()
@@ -329,7 +330,8 @@ def main():
 
     else:
         # legit commands, mapped to handle functions
-        do_upload_file(token, storageurl, args.filename)
+        for filename in args.filename:
+            do_upload_file(token, storageurl, filename)
 
     print (Style.NORMAL)
 

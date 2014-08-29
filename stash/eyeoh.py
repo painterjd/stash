@@ -4,6 +4,8 @@ import keyring
 import json
 import requests
 import stash.util
+import sys
+import os
 
 STASH_CONTAINER_NAME = "stash_container"
 
@@ -134,3 +136,40 @@ def read_temp_url_key(token, url):
     if output.ok:
         return output.headers.get('X-Account-Meta-Temp-Url-Key')
 
+class upload_in_chunks(object):
+    def __init__(self, filename, chunksize=1 << 13):
+        self.filename = filename
+        self.chunksize = chunksize
+        self.totalsize = os.path.getsize(filename)
+        self.readsofar = 0
+
+    def __iter__(self):
+
+        _, filename_only = os.path.split(self.filename)
+
+        with open(self.filename, 'rb') as file:
+            while True:
+                data = file.read(self.chunksize)
+                if not data:
+                    sys.stderr.write("\n")
+                    break
+                self.readsofar += len(data)
+                percent = self.readsofar * 100 / self.totalsize
+                sys.stderr.write("\r{fname}: {percent:3.0f}%".format(fname=filename_only,
+                    percent=percent))
+
+                yield data
+
+    def __len__(self):
+        return self.totalsize
+
+class IterableToFileAdapter(object):
+    def __init__(self, iterable):
+        self.iterator = iter(iterable)
+        self.length = len(iterable)
+
+    def read(self, size=-1): # TBD: add buffer for `len(data) > size` case
+        return next(self.iterator, b'')
+
+    def __len__(self):
+        return self.length
