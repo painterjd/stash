@@ -17,48 +17,14 @@ import requests
 import urllib.parse
 import sys
 
+import stash.config
+
 STASH_CONTAINER_NAME = "stash_container"
 
 def print_error(error):
     print (Style.BRIGHT + Fore.RED + "ERROR: " +
            Fore.GREEN + error +
            Style.NORMAL + Fore.RESET)
-
-def config_dir():
-    pass
-
-def get_config_filename():
-    homedir = os.getenv('HOME')
-    configfile = os.path.join(homedir, '.stash')
-    return configfile
-
-def read_config():
-    configfile = get_config_filename()
-
-    config = configparser.RawConfigParser()
-    config.read(configfile)
-
-    username = config.get('storage', 'username')
-    region = config.get('storage', 'region')
-    apikey = keyring.get_password('stash', username)
-
-    return username, apikey, region
-
-def write_config(username, apikey, region, storageurl):
-
-    config = configparser.RawConfigParser()
-
-    config.add_section("storage")
-    config.set("storage", "username", username)
-    config.set("storage", "region", region)
-
-    filename = get_config_filename()
-
-    with open(filename, 'w') as configfile:
-        config.write(configfile)
-
-    # todo: store the token in keyring as cache?
-    keyring.set_password('stash', username, apikey)
 
 def parse_iso_8601(date):
     formatstr = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -281,7 +247,7 @@ def do_configure(identityhost):
     assert region is not None
 
     # Now let's store that stuff in the config
-    write_config(username, apikey, region, publicurl)
+    stash.config.write_config(username, apikey, region, publicurl)
 
 def get_default_filename():
     pass
@@ -505,7 +471,7 @@ def main():
         do_configure(args.identityhost)
         exit(0)
 
-    username, apikey, region = read_config()
+    username, apikey, region = stash.config.read_config()
     token, endpoints = do_auth(username, apikey, args.authcache)
 
     # find the storage url we care about
