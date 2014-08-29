@@ -14,142 +14,14 @@ import sys
 
 import stash.config
 import stash.util
-
-STASH_CONTAINER_NAME = "stash_container"
-
-def do_auth(username, apikey, use_cache=True):
-
-    if use_cache:
-        token_expires = keyring.get_password('stash', 'tokenexpires')
-        token = keyring.get_password('stash', 'token')
-        ep_text = keyring.get_password('stash', 'endpoints')
-
-        if token_expires and token and ep_text:
-            expires_date = stash.util.parse_iso_8601(token_expires)
-            now = datetime.datetime.utcnow()
-
-            if now < expires_date:
-                # we should be good, just re-use the
-                # token
-                return token, json.loads(ep_text)
-
-    url = "https://identity.api.rackspacecloud.com/v2.0/tokens"
-    hdrs = {
-        'Content-Type': 'application/json'
-    }
-
-    body = {
-        "auth":
-        {
-            "RAX-KSKEY:apiKeyCredentials":
-            {
-                "username": username,
-                "apiKey": apikey
-            }
-        }
-    }
-
-    resp = requests.post(url, data=json.dumps(body), headers=hdrs)
-
-    if resp.ok:
-        output = resp.json()
-
-        token = output['access']['token']['id']
-        expires_text = output['access']['token']['expires']
-
-        # Cache the token and expiry in the keyring
-        keyring.set_password('stash', 'tokenexpires', expires_text)
-        keyring.set_password('stash', 'token', token)
-
-        # now find the block storage endpoints
-        sc = output['access']['serviceCatalog']
-
-
-        # Find all of the object store endpoints
-        os_endpoints = [service['endpoints'] for
-            service in sc if service['type'] == 'object-store'][0]
-
-        ep_text = json.dumps(os_endpoints)
-        keyring.set_password('stash', 'endpoints', ep_text)
-
-        return token, os_endpoints
-
-    elif resp.status_code == 401:
-        print (Fore.RED, "Invalid username/API key?")
-        return False
-
-def has_stash_container(token, url):
-
-    url = url + '/' + STASH_CONTAINER_NAME
-
-    hdrs = {
-        'X-Auth-Token': token
-    }
-
-    output = requests.head(url, headers=hdrs)
-
-    if output.status_code == 404:
-        return False
-    elif output.ok:
-        return True
-    else:  # something else happened
-        raise Exception("Unable to check for stash container")
-
-def create_stash_container(token, url):
-
-    url = url + '/' + STASH_CONTAINER_NAME
-
-    hdrs = {
-        'X-Auth-Token': token
-    }
-
-    output = requests.put(url, headers=hdrs)
-
-    if output.status_code == 404:
-        return False
-    elif output.ok:
-        return True
-    else:  # something else happened
-        raise Exception("Unable to create stash container")
-
-def file_exists(token, url, filename):
-    """Shares the specified file"""
-
-    print ("Sharing '{0}' from your stash".format(filename))
-
-    url = url + '/' + STASH_CONTAINER_NAME
-    url = url + '/' + stash.util.encode_filename(filename)
-
-    hdrs = {
-        'X-Auth-Token': token
-    }
-
-    output = requests.head(url, headers=hdrs)
-
-    if output.status_code == 404:
-        return False
-    elif output.ok:
-        return True
-    else:  # something else happened
-        raise Exception("Unable to stash a file")
-
-def read_temp_url_key(token, url):
-
-    hdrs = {
-        'X-Auth-Token': token
-    }
-
-    output = requests.head(url, headers=hdrs)
-
-    if output.ok:
-        return output.headers.get('X-Account-Meta-Temp-Url-Key')
+import stash.eyeoh
 
 def do_share_file(token, url, filename, duration):
-    if not file_exists(token, url, filename):
+    if not stash.eyeoh.file_exists(token, url, filename):
         stash.util.print_error("File '{0}' not found".format(filename))
         return
 
-    key = read_temp_url_key(token, url)
+    key = stash.eyeoh.read_temp_url_key(token, url)
 
     if not key:
         stash.util.print_error("""You must set a Temp URL key first.""")
@@ -164,7 +36,8 @@ def do_configure(identityhost):
     username = input("Username: ")
     apikey = input("API Key: ")
 
-    token, endpoints = do_auth(username, apikey, use_cache=False)
+    token, endpoints = stash.eyeoh.do_auth(username,
+        apikey, use_cache=False)
 
     # check each cloud files endpoints for a stash container.
     # At this point, the user is only allowed to have one
@@ -177,7 +50,7 @@ def do_configure(identityhost):
         region = endpoint['region']
         publicurl = endpoint['publicURL']
 
-        cont_found = has_stash_container(token, publicurl)
+        cont_found = stash.eyeoh.has_stash_container(token, publicurl)
 
         if cont_found:
             print ("Found a stash container in {0}".format(region))
@@ -208,7 +81,7 @@ def do_configure(identityhost):
                 break
 
     if not cont_found:
-        create_stash_container(token, publicurl)
+        stash.eyeoh.create_stash_container(token, publicurl)
 
     assert publicurl is not None
     assert region is not None
@@ -223,7 +96,7 @@ def do_fetch_file(token, url, filename, outfile):
 
     print ("Fetching '{0}' -> '{1}'".format(filename, outfile))
 
-    url = url + '/' + STASH_CONTAINER_NAME
+    url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
     url = url + '/' + stash.util.encode_filename(filename)
 
     hdrs = {
@@ -277,7 +150,7 @@ def do_upload_file(token, url, filename):
 
     _, fname = os.path.split(filename)
 
-    url = url + '/' + STASH_CONTAINER_NAME
+    url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
     url = url + '/' + stash.util.encode_filename(fname)
 
     hdrs = {
@@ -303,7 +176,7 @@ def do_delete_object(token, url, filename):
 
     _, fname = os.path.split(filename)
 
-    url = url + '/' + STASH_CONTAINER_NAME
+    url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
     url = url + '/' + stash.util.encode_filename(fname)
 
     hdrs = {
@@ -326,7 +199,7 @@ def do_delete_object(token, url, filename):
 
 def do_list_stashes(token, url):
 
-    url = url + '/' + STASH_CONTAINER_NAME
+    url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
 
     hdrs = {
         'X-Auth-Token': token
@@ -428,7 +301,7 @@ def main():
         exit(0)
 
     username, apikey, region = stash.config.read_config()
-    token, endpoints = do_auth(username, apikey, args.authcache)
+    token, endpoints = stash.eyeoh.do_auth(username, apikey, args.authcache)
 
     # find the storage url we care about
     storageurl = [ep for ep in endpoints
