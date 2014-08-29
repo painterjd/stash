@@ -5,6 +5,9 @@ import datetime
 import hashlib
 import hmac
 import urllib
+import time
+
+import stash.eyeoh
 
 def print_error(error):
     print (Style.BRIGHT + Fore.RED + "ERROR: " +
@@ -12,7 +15,11 @@ def print_error(error):
            Style.NORMAL + Fore.RESET)
 
 def parse_iso_8601(date):
-    formatstr = "%Y-%m-%dT%H:%M:%S.%fZ"
+    if date.endswith('Z'):
+        formatstr = "%Y-%m-%dT%H:%M:%S.%fZ"
+    else:
+        formatstr = "%Y-%m-%dT%H:%M:%S.%f"
+
     return datetime.datetime.strptime(date, formatstr)
 
 def create_temp_url(key, url, filename, duration):
@@ -20,7 +27,7 @@ def create_temp_url(key, url, filename, duration):
     path = urllib.parse.urlparse(url).path
 
     method = "GET"
-    object_path = path + "/" + STASH_CONTAINER_NAME + "/" + \
+    object_path = path + "/" + stash.eyeoh.STASH_CONTAINER_NAME + "/" + \
         encode_filename(filename)
 
     # duration is expressed in hours
@@ -34,7 +41,7 @@ def create_temp_url(key, url, filename, duration):
 
     fmt = "{0}/{1}/{2}?temp_url_sig={3}&temp_url_expires={4}&filename={5}"
 
-    return fmt.format(url, STASH_CONTAINER_NAME, encode_filename(filename),
+    return fmt.format(url, stash.eyeoh.STASH_CONTAINER_NAME, encode_filename(filename),
         sig, expires, urllib.parse.quote_plus(filename))
 
 def encode_filename(filename):

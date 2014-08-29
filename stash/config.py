@@ -11,6 +11,11 @@ def get_config_filename():
 def read_config():
     configfile = get_config_filename()
 
+    if not os.path.exists(configfile):
+        print ("Error: not config found. Run: ")
+        print ("  stash --configure")
+        exit(1)
+
     config = configparser.RawConfigParser()
     config.read(configfile)
 

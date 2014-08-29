@@ -7,7 +7,8 @@ import stash.util
 import sys
 import os
 
-STASH_CONTAINER_NAME = "stash_container"
+STASH_CONTAINER_NAME = "stash"
+STASH_CONTAINER_VERSIONS = "stash_versions__"
 
 def do_auth(username, apikey, use_cache=True):
 
@@ -92,6 +93,24 @@ def create_stash_container(token, url):
     url = url + '/' + STASH_CONTAINER_NAME
 
     hdrs = {
+        'X-Auth-Token': token,
+        'X-Versions-Location': STASH_CONTAINER_VERSIONS
+    }
+
+    output = requests.put(url, headers=hdrs)
+
+    if output.status_code == 404:
+        return False
+    elif output.ok:
+        return True
+    else:  # something else happened
+        raise Exception("Unable to create stash container")
+
+def create_stash_versions_container(token, url):
+
+    url = url + '/' + STASH_CONTAINER_VERSIONS
+
+    hdrs = {
         'X-Auth-Token': token
     }
 
@@ -103,6 +122,51 @@ def create_stash_container(token, url):
         return True
     else:  # something else happened
         raise Exception("Unable to create stash container")
+
+def container_stats(token, url, container):
+
+    url = url + '/' + container
+
+    hdrs = {
+        'X-Auth-Token': token
+    }
+
+    response = requests.head(url, headers=hdrs)
+
+    if response.status_code == 404:
+        return 0, 0
+    elif response.ok:
+        object_count = int(response.headers.get('x-container-object-count')) or 0
+        byte_count = int(response.headers.get('x-container-bytes-used')) or 0
+
+        return object_count, byte_count
+    else:  # something else happened
+        raise Exception("Unable to create stash container")
+
+def delete_container(token, url, container):
+
+    url = url + '/' + STASH_CONTAINER_VERSIONS
+
+    hdrs = {
+        'X-Auth-Token': token
+    }
+
+    output = requests.delete(url, headers=hdrs)
+
+    if output.status_code == 404:
+        return False
+    elif output.ok:
+        return True
+    else:  # something else happened
+        raise Exception("Unable to delete container")
+
+def delete_stash_containers(token, url):
+
+    object_count, byte_count = container_stats(token, url,
+        STASH_CONTAINER)
+
+    object_count, byte_count = container_stats(token, url,
+        STASH_CONTAINER_VERSIONS)
 
 def file_exists(token, url, filename):
     """Shares the specified file"""

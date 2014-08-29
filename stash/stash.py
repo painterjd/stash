@@ -32,7 +32,7 @@ def do_share_file(token, url, filename, duration):
     print ("Share this URL: ")
     print (temp_url)
 
-def do_configure(identityhost):
+def do_configure():
     username = input("Username: ")
     apikey = input("API Key: ")
 
@@ -81,6 +81,7 @@ def do_configure(identityhost):
                 break
 
     if not cont_found:
+        stash.eyeoh.create_stash_versions_container(token, publicurl)
         stash.eyeoh.create_stash_container(token, publicurl)
 
     assert publicurl is not None
@@ -132,7 +133,6 @@ def do_fetch_file(token, url, filename, outfile):
                 sys.stdout.write("%")
                 sys.stdout.flush()
 
-        print()
 
     if output.status_code == 404:
         return False
@@ -197,7 +197,6 @@ def do_delete_object(token, url, filename):
 
     print ("Finished stashing...")
 
-
 def do_list_stashes(token, url):
 
     url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
@@ -220,25 +219,110 @@ def do_list_stashes(token, url):
 
         body = output.json()
 
-        print ("==============")
-        print ("Stashed Items:")
-        print ("==============")
-
-        for x in range(0, len(body)):
-            item = body[x]
-
-            number = "{0}[{1}]{2}".format(
-                Fore.GREEN, x, Fore.RESET
-            )
-
+        for item in body:
             filename = stash.util.decode_filename(item['name'])
             size = item['bytes']
+            time = item['last_modified']
+
+            z = stash.util.parse_iso_8601(time)
+
+            z = datetime.datetime.strftime(z, '%b %d %Y')
 
             size = Fore.CYAN + " {" + str(size) + " bytes}"
 
-            print (number, Fore.BLUE + filename + size + Fore.RESET)
+            print (z, Fore.BLUE + filename + size + Fore.RESET)
     else:
         raise Exception("Unable to list stash container contents")
+
+def do_display_info(token, url):
+
+    object_count, byte_count = stash.eyeoh.container_stats(token, url,
+        stash.eyeoh.STASH_CONTAINER_NAME)
+
+    print (Fore.YELLOW)
+    print ("==============")
+    print ("Current Files:")
+    print ("==============", Fore.RESET)
+    print ("Files:", object_count)
+    print ("Bytes:", byte_count)
+
+    object_count, byte_count = stash.eyeoh.container_stats(token, url,
+        stash.eyeoh.STASH_CONTAINER_VERSIONS)
+
+    print (Fore.YELLOW)
+    print ("======================")
+    print ("Old Versions of Files:")
+    print ("======================", Fore.RESET)
+    print ("Files:", object_count)
+    print ("Bytes:", byte_count)
+    print ()
+
+def do_display_file_info(token, url, filename):
+    """Displays details information on a particular file"""
+
+    orig_url = url
+
+    def print_info(filename, size, md5, lastmod):
+        print ("Filename:        ", filename)
+        print ("Encoded Filename:", stash.util.encode_filename(filename))
+        print ("Size:            ", size)
+        print ("MD5:             ", md5)
+        print ("Last Modified:   ", lastmod)
+
+
+    # head the current file
+    url = url + '/' + stash.eyeoh.STASH_CONTAINER_NAME
+    url = url + '/' + stash.util.encode_filename(filename)
+
+    hdrs = {
+        'X-Auth-Token': token
+    }
+
+    response = requests.head(url, headers=hdrs)
+
+    if response.status_code == 404:
+        print ("Could not find file, sorry")
+        return
+    elif response.ok:
+        size = int(response.headers.get('content-length')) or 0
+        md5 = response.headers.get('etag')
+        lastmod = response.headers.get('last-modified')
+
+        print (Fore.YELLOW)
+        print ("=================")
+        print ("File Information:")
+        print ("=================", Fore.RESET)
+
+        print_info(filename, size, md5, lastmod)
+    else:  # something else happened
+        raise Exception("Unable to create stash container")
+
+    # previous versions!
+    print (Fore.YELLOW)
+    print ("==================")
+    print ("Previous Versions:")
+    print ("==================", Fore.RESET)
+
+    url = orig_url
+    url =url + '/' + stash.eyeoh.STASH_CONTAINER_VERSIONS
+
+    encoded_name = stash.util.encode_filename(filename)
+    len_hex = '%03x' % len(encoded_name)
+
+    params = {
+        'prefix': len_hex + encoded_name + '/',
+        'format': 'json'
+    }
+
+    response = requests.get(url, params=params, headers=hdrs)
+
+    for item in response.json():
+        size = int(item['bytes'])
+        md5 = item['hash']
+        lastmod = item['last_modified']
+
+        print_info(filename, size, md5, lastmod)
+        print()
 
 def main():
 
@@ -256,11 +340,7 @@ def main():
         """
     )
 
-    parser.add_argument("-k", "--identity", dest="identityhost",
-                        help="Override the default Keystone hostname")
-
-    parser.add_argument("-l", "--list", dest="list", default=False,
-                        nargs="?",
+    parser.add_argument("-l", "--list", dest="list", action="store_true",
                         help="List stashed files")
 
     parser.add_argument("-f", "--fetch", dest="fetch",
@@ -268,6 +348,10 @@ def main():
 
     parser.add_argument("-d", "--delete", dest="delete",
                         help="Delete the specified file")
+
+    parser.add_argument("-D", "--delete-stash", dest="deletestash",
+                        action="store_true",
+                        help="Delete the stash (must be empty first)")
 
     parser.add_argument("-o", "--output", dest="outfile",
                         help="When fetching, write to this file")
@@ -280,17 +364,22 @@ def main():
                         help="Duration (in hours) to share a file.")
 
     parser.add_argument("-c", "--configure", dest="configure",
-                        nargs="?",
-                        default=False,
+                        action="store_true",
                         help="Configure stash")
 
+    parser.add_argument("-I", "--stash-info", dest="stashinfo",
+                        action="store_true",
+                        help = "Show stash-wide information")
+
     parser.add_argument("-i", "--info", dest="info",
-                        nargs="?",
-                        help = "Show configuration information")
+                        help = "Show detailed info for a particular file")
 
     parser.add_argument("-n", "--no-auth-cache", dest="authcache",
-                        default=True, nargs="?",
+                        action="store_true",
                         help="Don't use auth cache for this request")
+
+    parser.add_argument("-v", "--show-file-versions", dest="versions",
+                        help="Show version information for the specified file")
 
     parser.add_argument("filename", nargs="*",
                         help="The file to stash")
@@ -298,7 +387,7 @@ def main():
     args = parser.parse_args()
 
     if args.configure is not False:
-        do_configure(args.identityhost)
+        do_configure()
         exit(0)
 
     username, apikey, region = stash.config.read_config()
@@ -321,8 +410,19 @@ def main():
         do_delete_object(token, storageurl, args.delete)
         exit(0)
 
+    if args.deletestash:
+        do_delete_stash(token, storageurl)
+
     if args.share:
         do_share_file(token, storageurl, args.share, args.duration)
+        exit(0)
+
+    if args.stashinfo:
+        do_display_info(token, storageurl)
+        exit(0)
+
+    if args.info:
+        do_display_file_info(token, storageurl, args.info)
         exit(0)
 
     if not args.filename:
